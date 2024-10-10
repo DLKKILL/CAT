@@ -405,16 +405,21 @@ class ConformerLSTM(ConformerNet):
 class Wav2Vec2Encoder(AbsEncoder):
     def __init__(
         self,
+        backend: Literal["huggingface", "fairseq"],
         pretrained_model: str,
         use_wav2vec2_encoder: bool = False,
-        tune_wav2vec2: bool = False,
+        tune_wav2vec2_encoder: bool = False,
+        tune_wav2vec2_feat_extractor: bool = False,
         enc_head_type: str = "ConformerNet",
         **enc_head_kwargs,
     ) -> None:
         """
-        pretrained_model (str) : huggingface pretrained model, e.g. facebook/wav2vec2-base
+        pretrained_model (str) : fairseq or huggingface pretrained model,
+            fairseq: path of .pt checkpoint file
+            huggingface: name of huggingface pretrained model e.g. facebook/wav2vec2-base
         use_wav2vec2_encoder (bool) : if True, use the pretrained wav2vec2 transformer
-        tune_wav2vec2 (bool) : if True, allow wav2vec models to be updated
+        tune_wav2vec2_encoder (bool) : if True, allow wav2vec transformer to be updated
+        tune_wav2vec2_feat_extractor (bool) : if True, allow wav2vec feature extractor to be updated
         enc_head_type (str): any of the AbsEncoder class, or 'Linear'
         enc_head_kwargs : options passed to enc_head_type()
 
@@ -422,7 +427,7 @@ class Wav2Vec2Encoder(AbsEncoder):
             x -> wav2vec2_feature_extractor -> (wav2vec2_encoder) -> enc_head -> out
         """
         super().__init__(False)
-
+        # super().__init__()
         assert enc_head_type.isidentifier(), "invalid type"
         if enc_head_type == "Linear":
             # generally, odim of _wav2vec2_feat_extractor is 512
@@ -435,21 +440,33 @@ class Wav2Vec2Encoder(AbsEncoder):
             assert issubclass(T_enc, AbsEncoder)
             self._enc_head = T_enc(**enc_head_kwargs)  # type: AbsEncoder
 
-        # import huggingface model to torch built-in model
-        wav2vec2 = import_huggingface_model(
-            Wav2Vec2ForCTC.from_pretrained(pretrained_model)
-        )
+        if backend == "fairseq":
+            # import fairseq model to torch built-in model
+            from torchaudio.models.wav2vec2.utils import import_fairseq_model
+            from fairseq.checkpoint_utils import load_model_ensemble_and_task
+            wav2vec2 = import_fairseq_model(
+                load_model_ensemble_and_task([pretrained_model])[0][0]
+            )
+        else:
+            # import huggingface model to torch built-in model
+            from torchaudio.models.wav2vec2.utils import import_huggingface_model
+            from transformers import Wav2Vec2ForCTC
+            wav2vec2 = import_huggingface_model(
+                Wav2Vec2ForCTC.from_pretrained(pretrained_model)
+            )
 
         self._wav2vec2_feat_extractor = wav2vec2.feature_extractor
         if use_wav2vec2_encoder:
             self._wav2vec2_encoder = wav2vec2.encoder
         else:
             self._wav2vec2_encoder = None
-
-        if not tune_wav2vec2:
+        if tune_wav2vec2_encoder:
+            self._wav2vec2_encoder.requires_grad_(True)
+        if not tune_wav2vec2_feat_extractor:
             self._wav2vec2_feat_extractor.requires_grad_(False)
-            if use_wav2vec2_encoder:
-                self._wav2vec2_encoder.requires_grad_(False)
+
+        if not tune_wav2vec2_encoder and use_wav2vec2_encoder:
+            self._wav2vec2_encoder.requires_grad_(False)
 
     def forward(self, x: torch.Tensor, xlens: torch.Tensor):
         x, xlens = self._wav2vec2_feat_extractor(x.squeeze(2), xlens)
