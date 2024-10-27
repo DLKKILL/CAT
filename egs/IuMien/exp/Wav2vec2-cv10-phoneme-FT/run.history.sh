@@ -5,11 +5,6 @@
 # you could download pt_tokenizer and pt_model from 
 # https://github.com/thu-spmi/CAT/tree/master/egs/cv-lang10/exp/Multilingual/Wav2vec-lang10
 
-# pt_tokenizer_path=
-# ft_tokenizer_path=
-# pt_model_path=
-# output_model_path=
-# python exp/Whistle-phoneme-FT/unpack_mulingual_param.py $pt_tokenizer_path $ft_tokenizer_path $pt_model_path $output_model_path  --mode flatphone
 
 # train model
 # python utils/pipeline/asr.py exp/Wav2vec2-cv10-phoneme-FT --sta 3 --sto 3

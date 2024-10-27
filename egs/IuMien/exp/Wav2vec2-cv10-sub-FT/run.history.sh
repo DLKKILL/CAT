@@ -1,6 +1,5 @@
 # Firstly,you could download pretrain model from https://github.com/thu-spmi/CAT/tree/master/egs/cv-lang10/exp/Multilingual/Wav2vec-lang10
-# and then we should modify pt model classfier layer 
-# python local/process_model_for_subword_ft.py --pt_model_path --output_model_path --vocab_size
+
 
 
 # train
