@@ -42,6 +42,14 @@ PAYLOAD_DIR="${WORK_DIR}/payload"
 FETCH_DEPS="${FETCH_DEPS:-1}"
 DOWNLOAD_PY_WHEELS="${DOWNLOAD_PY_WHEELS:-0}"
 STRIP_GIT_METADATA="${STRIP_GIT_METADATA:-0}"
+LATEST_TORCH_TRANSFORMERS="${LATEST_TORCH_TRANSFORMERS:-0}"
+if [ -n "${TRANSFORMERS_SPEC:-}" ]; then
+  TRANSFORMERS_REQUIREMENT="$TRANSFORMERS_SPEC"
+elif [ "$LATEST_TORCH_TRANSFORMERS" = "1" ]; then
+  TRANSFORMERS_REQUIREMENT="transformers"
+else
+  TRANSFORMERS_REQUIREMENT="transformers>=4.12.3,<4.54"
+fi
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
 TAR_CREATE_FLAGS=()
 
@@ -139,12 +147,13 @@ write_runtime_requirements() {
   # by local source trees in payload/third_party/repos, so the target installer
   # should only ask pip mirrors for ordinary Python packages. Torch is installed
   # through conda so CUDA variants stay explicit and reproducible.
-  awk '
+  awk -v transformers_requirement="$TRANSFORMERS_REQUIREMENT" '
     /^[[:space:]]*$/ { print; next }
     /^[[:space:]]*#/ { print; next }
     /^[[:space:]]*-e[[:space:]]+git\+/ { next }
     /^[[:space:]]*torch([<>=!~ ]|$)/ { next }
     /^[[:space:]]*jiwer([<>=!~ ]|$)/ { print "jiwer>=2.2.0,<3.0"; next }
+    /^[[:space:]]*transformers([<>=!~ ]|$)/ { print transformers_requirement; next }
     { print }
   ' "$src_req" >"$dst_req"
 
@@ -202,6 +211,8 @@ write_manifest() {
     printf 'CAT_REPO_ROOT: %s\n' "$CAT_REPO_ROOT"
     printf 'INSTALL_SCRIPT: %s\n' "$INSTALL_SCRIPT"
     printf 'BUNDLE_README: %s\n' "$BUNDLE_README"
+    printf 'LATEST_TORCH_TRANSFORMERS: %s\n' "$LATEST_TORCH_TRANSFORMERS"
+    printf 'TRANSFORMERS_REQUIREMENT: %s\n' "$TRANSFORMERS_REQUIREMENT"
     printf 'BUNDLE_NAME: %s\n' "$BUNDLE_NAME"
     printf '\nBundled source repositories:\n'
     for repo in "${PAYLOAD_DIR}"/third_party/repos/*; do

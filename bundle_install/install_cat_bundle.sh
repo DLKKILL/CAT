@@ -21,6 +21,9 @@ TORCH_VERSION="${TORCH_VERSION:-2.1.0}"
 TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.16.0}"
 TORCHAUDIO_VERSION="${TORCHAUDIO_VERSION:-2.1.0}"
 INSTALL_TORCH="${INSTALL_TORCH:-1}"
+LATEST_TORCH_TRANSFORMERS="${LATEST_TORCH_TRANSFORMERS:-0}"
+TRANSFORMERS_SPEC="${TRANSFORMERS_SPEC:-}"
+DEFAULT_TRANSFORMERS_SPEC="${DEFAULT_TRANSFORMERS_SPEC:-transformers>=4.12.3,<4.54}"
 INSTALL_CUDA_BUILD_TOOLKIT="${INSTALL_CUDA_BUILD_TOOLKIT:-0}"
 
 CAT_INSTALL_ROOT="${CAT_INSTALL_ROOT:-${HOME}/CAT}"
@@ -72,6 +75,15 @@ log() {
 die() {
   printf '[cat-install][error] %s\n' "$*" >&2
   exit 1
+}
+
+warn_latest_torch_transformers_profile() {
+  if [ "$LATEST_TORCH_TRANSFORMERS" != "1" ]; then
+    return 0
+  fi
+
+  log "latest torch/transformers profile enabled"
+  log "this profile is not the default verified CAT stack; native extensions such as ctc-crf, warp-rnnt, warp-ctct and ctc-align-cuda must be rebuilt and smoke-tested after installation"
 }
 
 run() {
@@ -288,13 +300,20 @@ ensure_conda_env() {
     "cmake<4" make ninja pkg-config automake autoconf libtool curl wget sox git \
     boost-cpp eigen zlib bzip2 xz
 
-  if [ "$INSTALL_TORCH" = "1" ] && need_torch_runtime; then
-    log "install PyTorch from conda mirror"
-    conda_cmd install -y "${channels[@]}" \
-      "pytorch==${TORCH_VERSION}" \
-      "torchvision==${TORCHVISION_VERSION}" \
-      "torchaudio==${TORCHAUDIO_VERSION}" \
-      "pytorch-cuda=${CUDA_VERSION}"
+  if [ "$INSTALL_TORCH" = "1" ]; then
+    if [ "$LATEST_TORCH_TRANSFORMERS" = "1" ]; then
+      log "install latest PyTorch from conda channels"
+      conda_cmd install -y "${channels[@]}" \
+        pytorch torchvision torchaudio \
+        "pytorch-cuda=${CUDA_VERSION}"
+    elif need_torch_runtime; then
+      log "install pinned PyTorch from conda channels"
+      conda_cmd install -y "${channels[@]}" \
+        "pytorch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}" \
+        "torchaudio==${TORCHAUDIO_VERSION}" \
+        "pytorch-cuda=${CUDA_VERSION}"
+    fi
   fi
 
   if [ "$INSTALL_CUDA_BUILD_TOOLKIT" = "1" ]; then
@@ -356,11 +375,32 @@ prepare_cat_tree() {
 }
 
 install_runtime_python_deps() {
-  [ "$DONE_RUNTIME_DEPS" = "0" ] || return 0
-  DONE_RUNTIME_DEPS=1
-  need_file "${PAYLOAD_DIR}/requirements/requirements.runtime.txt"
-  log "install ordinary Python dependencies"
-  pip_install -r "${PAYLOAD_DIR}/requirements/requirements.runtime.txt"
+  local runtime_deps_were_skipped=0
+  if [ "$DONE_RUNTIME_DEPS" = "0" ]; then
+    DONE_RUNTIME_DEPS=1
+    need_file "${PAYLOAD_DIR}/requirements/requirements.runtime.txt"
+    log "install ordinary Python dependencies"
+    pip_install -r "${PAYLOAD_DIR}/requirements/requirements.runtime.txt"
+  else
+    runtime_deps_were_skipped=1
+    log "runtime Python dependencies already marked done; checking transformers profile"
+  fi
+
+  if [ "$LATEST_TORCH_TRANSFORMERS" = "1" ]; then
+    local transformers_spec="${TRANSFORMERS_SPEC:-transformers}"
+    log "upgrade transformers for latest torch/transformers profile: ${transformers_spec}"
+    pip_install --upgrade "$transformers_spec"
+  elif [ -n "$TRANSFORMERS_SPEC" ]; then
+    log "override transformers package: ${TRANSFORMERS_SPEC}"
+    pip_install --upgrade "$TRANSFORMERS_SPEC"
+  elif [ "$runtime_deps_were_skipped" = "1" ]; then
+    # A previous bundle run may have installed a newer transformers release
+    # before the default range was tightened for torch 2.1. Re-apply the default
+    # profile when runtime deps are skipped so rerunning the installer repairs
+    # an existing cat environment instead of leaving the old incompatible wheel.
+    log "ensure default transformers compatibility: ${DEFAULT_TRANSFORMERS_SPEC}"
+    pip_install --upgrade "$DEFAULT_TRANSFORMERS_SPEC"
+  fi
 }
 
 copy_repo_to_cat_src() {
@@ -815,6 +855,7 @@ install_requested_modules() {
 
 main() {
   parse_args "$@"
+  warn_latest_torch_transformers_profile
   need_dir "$PAYLOAD_DIR"
   need_dir "$CAT_SRC"
   need_dir "$REPOS_DIR"
